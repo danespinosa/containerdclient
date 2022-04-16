@@ -23,3 +23,7 @@ func _createFile(name *uint16, access uint32, mode uint32, sa *syscall.SecurityA
 // attrs: syscall.FILE_FLAG_OVERLAPPED|cSECURITY_SQOS_PRESENT|cSECURITY_ANONYMOUS // None token and Anonymous and Asynchronous
 // template file 0
 ```
+
+refrences: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew  
+http://pinvoke.net/default.aspx/kernel32/CreateFile.html  
+https://docs.microsoft.com/en-us/aspnet/core/grpc/client?view=aspnetcore-6.0#configure-grpc-client
