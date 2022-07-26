@@ -7,6 +7,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GrpcClient1", "GrpcClient1.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "gRPC_BaseClient", "..\gRPC_BaseClient\gRPC_BaseClient.csproj", "{696DE9BD-E6AD-4262-A816-FF326124529E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ContainerDServer", "..\ContainerDServer\ContainerDServer.csproj", "{03CE1D1C-68CD-4AEA-952D-4290FE310FCC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{696DE9BD-E6AD-4262-A816-FF326124529E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{696DE9BD-E6AD-4262-A816-FF326124529E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{696DE9BD-E6AD-4262-A816-FF326124529E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{03CE1D1C-68CD-4AEA-952D-4290FE310FCC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{03CE1D1C-68CD-4AEA-952D-4290FE310FCC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{03CE1D1C-68CD-4AEA-952D-4290FE310FCC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{03CE1D1C-68CD-4AEA-952D-4290FE310FCC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
