@@ -53,63 +53,61 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
         //this._pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: this.handle);
     }
 
-    public async ValueTask<Stream> ConnectAsync2(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
-    {
-        var buffer = new byte[24];
-        int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
-        var client = new NamedPipeClientStream(".",
-            "containerd-containerd",
-            PipeDirection.InOut,
-            PipeOptions.Asynchronous,
-            TokenImpersonationLevel.Anonymous);
+    //public async ValueTask<Stream> ConnectAsync2(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
+    //{
+    //    var buffer = new byte[24];
+    //    int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
+    //    var client = new NamedPipeClientStream(".",
+    //        "containerd-containerd",
+    //        PipeDirection.InOut,
+    //        PipeOptions.Asynchronous,
+    //        TokenImpersonationLevel.Anonymous);
 
-        await client.ConnectAsync();
-        await client.WriteAsync(buffer.AsMemory(0, numWrite));
-        return client;
-    }
+    //    await client.ConnectAsync();
+    //    await client.WriteAsync(buffer.AsMemory(0, numWrite));
+    //    return client;
+    //}
 
-    public async ValueTask<Stream> ConnectAsync3(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken) 
-    {
-        // Write preface
-        int pipeFlags = SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED;
-        //int fileAccess = unchecked((int)(GENERIC_READ | GENERIC_WRITE));
-        uint fileAccess = GENERIC_READ | GENERIC_WRITE;
-        //int fileAccess = FILE_READ_DATA | FILE_WRITE_ATTRIBUTES;
-        var secAttributes = default(SECURITY_ATTRIBUTES);
-        this.handle = CreateNamedPipeClient(
-            $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
-            fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
-            0,                  // sharing: none
-            ref secAttributes,           // security attributes
-            FileMode.Open,      // open existing
-            SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED,         // impersonation flags
-            IntPtr.Zero);  // template file: null
-        int error = Marshal.GetLastWin32Error();
+    //public async ValueTask<Stream> ConnectAsync3(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken) 
+    //{
+    //    // Write preface
+    //    int pipeFlags = SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED;
+    //    //int fileAccess = unchecked((int)(GENERIC_READ | GENERIC_WRITE));
+    //    uint fileAccess = GENERIC_READ | GENERIC_WRITE;
+    //    //int fileAccess = FILE_READ_DATA | FILE_WRITE_ATTRIBUTES;
+    //    var secAttributes = default(SECURITY_ATTRIBUTES);
+    //    this.handle = CreateFileW(
+    //        $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
+    //        fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
+    //        0,                  // sharing: none
+    //        ref secAttributes,           // security attributes
+    //        FileMode.Open,      // open existing
+    //        SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED,         // impersonation flags
+    //        IntPtr.Zero);  // template file: null
+    //    int error = Marshal.GetLastWin32Error();
 
         
-        var handle2 = CreateNamedPipeClient(
-            $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
-            fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
-            0,                  // sharing: none
-            ref secAttributes,           // security attributes
-            FileMode.Open,      // open existing
-            SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED,         // impersonation flags
-            IntPtr.Zero);  // template file: null
-        error = Marshal.GetLastWin32Error();
-        var buffer = new byte[24];
-        int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
-        NativeOverlapped nativeOverlapped = new NativeOverlapped();
-        ManualResetEvent eventWaitHandle = new ManualResetEvent(false);
-        var writtenBytes = (uint)numWrite;
+    //    var handle2 = CreateFileW(
+    //        $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
+    //        fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
+    //        0,                  // sharing: none
+    //        ref secAttributes,           // security attributes
+    //        FileMode.Open,      // open existing
+    //        SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED,         // impersonation flags
+    //        IntPtr.Zero);  // template file: null
+    //    error = Marshal.GetLastWin32Error();
+    //    var buffer = new byte[24];
+    //    int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
+    //    NativeOverlapped nativeOverlapped = new NativeOverlapped();
+    //    ManualResetEvent eventWaitHandle = new ManualResetEvent(false);
+    //    var writtenBytes = (uint)numWrite;
 
-        _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle2, ownsHandle: true));
-        var buffer2 = new byte[24];
-        //await _pipe.ConnectAsync();
-        await _pipe.WriteAsync(buffer.AsMemory(0, numWrite));
-        return _pipe;
-    }
-
-
+    //    _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle2, ownsHandle: true));
+    //    var buffer2 = new byte[24];
+    //    //await _pipe.ConnectAsync();
+    //    await _pipe.WriteAsync(buffer.AsMemory(0, numWrite));
+    //    return _pipe;
+    //}
 
     public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
     {
@@ -123,51 +121,25 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             }
 
             // Write preface
-            int pipeFlags = FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
-            //int fileAccess = unchecked((int)(GENERIC_READ | GENERIC_WRITE));
+            uint pipeFlags = SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
             uint fileAccess = GENERIC_READ | GENERIC_WRITE;
-            //int fileAccess = FILE_READ_DATA | FILE_WRITE_ATTRIBUTES;
-            var secAttributes = default(SECURITY_ATTRIBUTES);
-            this.handle = CreateNamedPipeClient(
+            int error;
+            this.handle = CreateFileW(
                 $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
                 fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
                 0,                  // sharing: none
-                ref secAttributes,           // security attributes
+                IntPtr.Zero,           // security attributes
                 FileMode.Open,      // open existing
-                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS,         // impersonation flags
+                pipeFlags,         // impersonation flags
                 IntPtr.Zero);  // template file: null
-            int error = Marshal.GetLastWin32Error();
+            if (this.handle == (IntPtr)(-1))
+            {
+                error = Marshal.GetLastWin32Error();
+            }
+            var buffer = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
             
-            //StartCompletionRoutine();
-            //var fileCompletionPort = CreateIoCompletionPort(this.handle, this.completionHandle, UIntPtr.Zero, 4294967295);
-            //error = Marshal.GetLastWin32Error();
-            //bool notification = SetFileCompletionNotificationModes(this.handle, 1 | 2);
-
-            var buffer = new byte[24];
-            int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
-            NativeOverlapped nativeOverlapped = new NativeOverlapped();
-            ManualResetEvent eventWaitHandle = new ManualResetEvent(false);
-            nativeOverlapped.EventHandle = eventWaitHandle.SafeWaitHandle.DangerousGetHandle();
-            //IntPtr intPtr = this.handle.DangerousGetHandle();
-            var writtenBytes = (uint)numWrite;
-
-            //_pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: this.handle);
-            //_pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle:false));
-            //await _pipe.WriteAsync(buffer, 0, numWrite);
-            //var buffer2 = new byte[64];
-            //int numWrite2 = Encoding.ASCII.GetBytes("\x00\x00\x00\x04\x00\x00\x00\x00\x00", buffer2);
-            //await _pipe.WriteAsync(buffer2, 0, numWrite2);
-
-            //await Task.WhenAny(preface, settings);
-
-            var write = WriteFile(this.handle, buffer, writtenBytes, out uint bytesWritten, ref nativeOverlapped);
+            var write = WriteFile(this.handle, buffer, buffer.Length, IntPtr.Zero, IntPtr.Zero);
             error = Marshal.GetLastWin32Error();
-            uint bytesWritten6;
-            if (error == 997)
-                GetOverlappedResult(handle, ref nativeOverlapped, out bytesWritten6, true);
-            eventWaitHandle.WaitOne();
-
-
 
             await Task.Delay(8000);
             //write = WriteFile(handle, buffer, writtenBytes, out uint bytesWritten2, ref nativeOverlapped);

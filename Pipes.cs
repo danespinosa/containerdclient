@@ -82,14 +82,14 @@
     /// <param name="hTemplateFile">The template file.</param>
     /// <returns>The Safe Pipe handle.</returns>
     /// <see href="https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea"/>
-    /// <see href="https://github.com/dotnet/runtime/blob/a24364a09d9aea98b545f16689a53bafc6b18c14/src/libraries/Common/src/Interop/Windows/Kernel32/Interop.CreateNamedPipeClient.cs"/>
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true, BestFitMapping = false)]
+    /// <see href="https://github.com/dotnet/runtime/blob/a24364a09d9aea98b545f16689a53bafc6b18c14/src/libraries/Common/src/Interop/Windows/Kernel32/Interop.CreateFileW.cs"/>
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, BestFitMapping = false)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        internal static extern IntPtr CreateNamedPipeClient(
+        internal static extern IntPtr CreateFileW(
           string? lpFileName,
           uint dwDesiredAccess,
           FileShare dwShareMode,
-          ref SECURITY_ATTRIBUTES secAttrs,
+          IntPtr secAttrs,
           FileMode dwCreationDisposition,
           uint dwFlagsAndAttributes,
           IntPtr hTemplateFile);
@@ -98,7 +98,7 @@
     //internal static extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, [In] ref System.Threading.NativeOverlapped lpOverlapped);
 
     [DllImport("kernel32.dll", BestFitMapping = false, CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, [In] ref System.Threading.NativeOverlapped lpOverlapped);
+    internal static extern bool WriteFile(IntPtr hFile, byte[] buffer, int nNumberOfBytesToWrite, IntPtr numberOfBytesWritten, IntPtr lpOverlapped);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern bool GetOverlappedResult(IntPtr hFile,
