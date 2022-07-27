@@ -19,7 +19,18 @@ IConnectionFactory connectionFactory = isWindows ? new NamedPipeConnectionFactor
 var socketsHttpHandler = new SocketsHttpHandler
 {
     ConnectCallback = connectionFactory.ConnectAsync,
+    //PlaintextStreamFilter = PlainTextStreamFilter
 };
+
+async ValueTask<Stream> PlainTextStreamFilter(SocketsHttpPlaintextStreamFilterContext arg1, CancellationToken arg2)
+{
+    var http2Stream = new Http2Stream((NamedPipeClientStream)arg1.PlaintextStream);
+    var b = new byte[32000];
+    var bytes = await http2Stream.ReadAsync(b);
+
+    return http2Stream;
+}
+
 var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
 {
     HttpHandler = socketsHttpHandler, 
@@ -50,14 +61,14 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
     public NamedPipeConnectionFactory(string pipeName) {
         _pipeName = pipeName;
        
-        //this._pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: this.handle);
+        //this._pipe = new namedpipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: this.handle);
     }
 
     //public async ValueTask<Stream> ConnectAsync2(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
     //{
     //    var buffer = new byte[24];
     //    int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
-    //    var client = new NamedPipeClientStream(".",
+    //    var client = new namedpipeClientStream(".",
     //        "containerd-containerd",
     //        PipeDirection.InOut,
     //        PipeOptions.Asynchronous,
@@ -103,7 +114,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
     //    ManualResetEvent eventWaitHandle = new ManualResetEvent(false);
     //    var writtenBytes = (uint)numWrite;
 
-    //    _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle2, ownsHandle: true));
+    //    _pipe = new namedpipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle2, ownsHandle: true));
     //    var buffer2 = new byte[24];
     //    //await _pipe.ConnectAsync();
     //    await _pipe.WriteAsync(buffer.AsMemory(0, numWrite));
@@ -139,20 +150,28 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             }
 
             _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
+            //var http2Stream = new Http2Stream(_pipe);
+            //var b = new byte[32000];
+            //var bytes = await http2Stream.ReadAsync(b);
+
+            //return http2Stream;
 
             var read = Task.Run(async () =>
             {
                 var b = new byte[32000];
+                int i = 0;
                 var bytes = await _pipe.ReadAsync(b);
                 Console.WriteLine($"Read {bytes}");
-            } );
-            var buffer = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+            });
 
-            //await _pipe.WriteAsync(buffer);
-            // await read;
-            var write = WriteFile(this.handle, buffer, buffer.Length, IntPtr.Zero, IntPtr.Zero);
-            error = Marshal.GetLastWin32Error();
+            //var buffer = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
+            ////await _pipe.WriteAsync(buffer);
+            //var write = WriteFile(this.handle, buffer, buffer.Length, IntPtr.Zero, IntPtr.Zero);
+            //error = Marshal.GetLastWin32Error();
+            //byte[] settings = new byte[8];
+            //write = WriteFile(this.handle, settings, settings.Length, IntPtr.Zero, IntPtr.Zero);
+            //error = Marshal.GetLastWin32Error();
             //await Task.Delay(8000);
             //write = WriteFile(handle, buffer, writtenBytes, out uint bytesWritten2, ref nativeOverlapped);
             //error = Marshal.GetLastWin32Error();
@@ -168,6 +187,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             //await _pipe.DisposeAsync();
             throw;
         }
+
         return _pipe;
     }
 
@@ -195,4 +215,101 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
 public interface IConnectionFactory
 {
     ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken);
+}
+
+class Http2Stream : Stream
+{
+    static object settingsFrameReadLock = new object();
+    public Http2Stream(NamedPipeClientStream namedPipeClientStream)
+    {
+        namedpipeClientStream = namedPipeClientStream;
+        this.isFirst = true;
+        this.frameReadBytes = 0;
+    }
+
+    public override bool CanRead => namedpipeClientStream.CanRead;
+
+    public override bool CanSeek => namedpipeClientStream.CanSeek;
+
+    public override bool CanWrite => namedpipeClientStream.CanWrite;
+
+    public override long Length => namedpipeClientStream.Position;
+
+    public override long Position { get { return this.namedpipeClientStream.Position; } set  { this.namedpipeClientStream.Position = value; } }
+    private NamedPipeClientStream namedpipeClientStream { get; }
+
+    private bool isFirst;
+    private int frameReadBytes;
+    private byte[]? settingsBuffer;
+
+    public override void Flush()
+    {
+        this.namedpipeClientStream.Flush();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+
+        if (isFirst)
+        {
+            lock (settingsFrameReadLock)
+            {
+                if (isFirst)
+                {
+                    // The first read unblocks the blocked call, but when reading then we get the first Frames that are the FrameSettings returned from the Server.
+                    // We store those settings back so the HTTP/2.0 client receives the right settings the first time the http2/client tries to read those settings.
+                    this.frameReadBytes = this.namedpipeClientStream.Read(buffer, offset, count);
+                    this.settingsBuffer = new byte[buffer.Length];
+                    CopyBytesFromBufferToBuffer(buffer, settingsBuffer, this.frameReadBytes);
+                    isFirst = false;
+
+                    return 0;
+                }
+            }
+        }
+
+        //if (this.settingsBuffer != null)
+        //{
+        //    lock (settingsFrameReadLock)
+        //    {
+        //        if (this.settingsBuffer != null)
+        //        {
+        //            CopyBytesFromBufferToBuffer(settingsBuffer, buffer, this.frameReadBytes);
+                    
+        //            this.settingsBuffer = null;
+        //            return frameReadBytes;
+        //        }
+        //    }
+        //}
+
+        var readBytes = this.namedpipeClientStream.Read(buffer, offset, count);
+        return readBytes;
+    }
+
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        return this.namedpipeClientStream.Seek(offset, origin);
+    }
+
+    public override void SetLength(long value)
+    {
+        this.namedpipeClientStream.SetLength(value);
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        this.namedpipeClientStream.Write(buffer, offset, count);
+    }
+
+    private void CopyBytesFromBufferToBuffer(byte[] bufferA, byte[] bufferB, int count) 
+    {
+        if (bufferB.Length < count)
+        {
+            throw new InvalidOperationException($"The buffer b size has to be at least of size {count}");
+        }
+        for (int i = 0; i < count; i++)
+        {
+            bufferB[i] = bufferA[i];
+        }
+    }
 }
