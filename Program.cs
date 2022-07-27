@@ -64,7 +64,8 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
     //        TokenImpersonationLevel.Anonymous);
 
     //    await client.ConnectAsync();
-    //    await client.WriteAsync(buffer.AsMemory(0, numWrite));
+    //    await client.
+    //    (buffer.AsMemory(0, numWrite));
     //    return client;
     //}
 
@@ -121,11 +122,11 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             }
 
             // Write preface
-            uint pipeFlags = SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
+            uint pipeFlags = FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
             uint fileAccess = GENERIC_READ | GENERIC_WRITE;
             int error;
             this.handle = CreateFileW(
-                $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
+                _pipeName,// _pipeName,
                 fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
                 0,                  // sharing: none
                 IntPtr.Zero,           // security attributes
@@ -136,12 +137,23 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             {
                 error = Marshal.GetLastWin32Error();
             }
+
+            _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
+
+            var read = Task.Run(async () =>
+            {
+                var b = new byte[32000];
+                var bytes = await _pipe.ReadAsync(b);
+                Console.WriteLine($"Read {bytes}");
+            } );
             var buffer = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
-            
+
+            //await _pipe.WriteAsync(buffer);
+            // await read;
             var write = WriteFile(this.handle, buffer, buffer.Length, IntPtr.Zero, IntPtr.Zero);
             error = Marshal.GetLastWin32Error();
 
-            await Task.Delay(8000);
+            //await Task.Delay(8000);
             //write = WriteFile(handle, buffer, writtenBytes, out uint bytesWritten2, ref nativeOverlapped);
             //error = Marshal.GetLastWin32Error();
             //_pipe.Write(buffer, 0, numWrite);
@@ -156,7 +168,6 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             //await _pipe.DisposeAsync();
             throw;
         }
-        _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle:true));
         return _pipe;
     }
 
