@@ -67,7 +67,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
         _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
     }
 
-    public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
+    public ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
     {
         /// Unblock the pipe by reading the first messages from the pipe which tells the HTTP/2 client how to behave.
         /// This approach is not 100% compatible with the current HTTP Client implementation so we skip the HttpClient processing this first message.
@@ -79,27 +79,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
         }, cancellationToken);
 
         var http2Stream = new Http2Stream(_pipe);
-        return http2Stream;
-    }
-
-    private void StartCompletionRoutine()
-    {
-        this.completionHandle = CreateIoCompletionPort(IntPtr.MaxValue, IntPtr.Zero, UIntPtr.Zero, 4294967295);
-        _ = Task.Run(() =>
-        {
-            while (true)
-            {
-                UIntPtr key;
-                IntPtr overlapped;
-                bool result = GetQueuedCompletionStatus(completionHandle, out uint lpNumberOfBytes, out key, out overlapped, INFINITE);
-                if (result) 
-                {
-                    int error = Marshal.GetLastWin32Error();
-                    Console.WriteLine($"Error in queue {error}");
-                }
-                Console.WriteLine("Got status");
-            }
-        }).ConfigureAwait(false);
+        return new ValueTask<Stream>(http2Stream);
     }
 }
 
