@@ -149,9 +149,9 @@ class Http2Stream : Stream
             {
                 if (isFirst)
                 {
-                    isFirst = false;
                     byte[] settingsBuffer = new byte[9];
                     var settingsReadBytes = this.namedpipeClientStream.Read(settingsBuffer, 0, settingsBuffer.Length);
+                    isFirst = false;
 
                     //See Line 1882 & 1845
                     //https://github.com/dotnet/runtime/blob/release/6.0/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/Http2Connection.cs
