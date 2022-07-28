@@ -3,19 +3,16 @@ using Containerd.Services.Namespaces.V1;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
-using System;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Security.Principal;
-using System.Text;
 using static Pipes;
 
 const string sockPath = "/run/containerd/containerd.sock";
 const string pipeName = @"\\.\pipe\containerd-containerd";
 bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 Console.WriteLine($"Check pipe: {File.Exists(@"\\.\pipe\containerd-containerd")}");
-IConnectionFactory connectionFactory = isWindows ? new NamedPipeConnectionFactory(pipeName) : new UnixDomainSocketConnectionFactory(sockPath);
+using IConnectionFactory connectionFactory = isWindows ? new NamedPipeConnectionFactory(pipeName) : new UnixDomainSocketConnectionFactory(sockPath);
 var socketsHttpHandler = new SocketsHttpHandler
 {
     ConnectCallback = connectionFactory.ConnectAsync,
@@ -54,7 +51,7 @@ foreach (var @namespace in namespaces.Namespaces)
 }
 
 
-public sealed class NamedPipeConnectionFactory : IConnectionFactory
+public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
 {
     private SafePipeHandle handle;
     private NamedPipeClientStream _pipe;
@@ -80,23 +77,32 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
         _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: handle);
     }
 
-    public ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
+    public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
     {
-        /// Unblock the pipe by reading the first messages from the pipe which tells the HTTP/2 client how to behave.
-        /// This approach is not 100% compatible with the current HTTP Client implementation so we skip the HttpClient processing this first message.
-        _ = Task.Run(async () =>
-        {
-            var b = new byte[32];
-            var bytes = await _pipe.ReadAsync(b);
-            Console.WriteLine($"Read {bytes} from named pipe to avoid blocking further calls.");
-        }, cancellationToken);
+        // Reading the first frame that the server sends to unblock the first write that the client will do.
+        // The Http2Stream will respond with this preface response at first read.
+        // This is the same behavior that http2_client in go. Line 367 t.reader()
+        // https://github.com/grpc/grpc-go/blob/master/internal/transport/http2_client.go
+        // Start the reader goroutine for incoming message. Each transport has
+        // a dedicated goroutine which reads HTTP2 frame from network. Then it
+        // dispatches the frame to the corresponding stream entity.
+        var b = new byte[32];
+        var bytes = await _pipe.ReadAsync(b);
+        Console.WriteLine($"Read {bytes} from named pipe to avoid blocking further calls.");
+        Memory<byte> prefaceResponse = new Memory<byte>(b, 0, bytes);
 
-        var http2Stream = new Http2Stream(_pipe);
-        return new ValueTask<Stream>(http2Stream);
+        var http2Stream = new Http2Stream(_pipe, prefaceResponse);
+        return http2Stream;
+    }
+
+    public void Dispose()
+    {
+        this._pipe.Dispose();
+        this.handle.Dispose();
     }
 }
 
-public interface IConnectionFactory
+public interface IConnectionFactory: IDisposable
 {
     ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken);
 }
@@ -107,7 +113,14 @@ class Http2Stream : Stream
     public Http2Stream(NamedPipeClientStream namedPipeClientStream)
     {
         namedpipeClientStream = namedPipeClientStream;
-        this.isFirst = true;
+        this.isFirstRead = true;
+    }
+
+    public Http2Stream(NamedPipeClientStream namedPipeClientStream, Memory<byte> prefaceServerResponse)
+    {
+        namedpipeClientStream = namedPipeClientStream;
+        this.prefaceServerResponse = prefaceServerResponse;
+        this.isFirstRead = true;
     }
 
     public override bool CanRead => namedpipeClientStream.CanRead;
@@ -121,7 +134,9 @@ class Http2Stream : Stream
     public override long Position { get { return this.namedpipeClientStream.Position; } set  { this.namedpipeClientStream.Position = value; } }
     private NamedPipeClientStream namedpipeClientStream { get; }
 
-    private bool isFirst;
+    private Memory<byte> prefaceServerResponse;
+
+    private bool isFirstRead;
 
     public override void Flush()
     {
@@ -155,25 +170,16 @@ class Http2Stream : Stream
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        /// We do the first read synchronously, this gets the settings headers.
-        /// Modifying the byte 4 is necessary to tell the HTTP Client 2 that we did all the necessary preface/header communication beforehand.
-        if (isFirst)
+        /// We do the first read at connection time and when the httpclient calls we respond with that same response.
+        if (isFirstRead)
         {
             lock (settingsFrameReadLock)
             {
-                if (isFirst)
+                if (isFirstRead)
                 {
-                    byte[] settingsBuffer = new byte[9];
-                    var settingsReadBytes = this.namedpipeClientStream.Read(settingsBuffer, 0, settingsBuffer.Length);
-                    isFirst = false;
-
-                    //See Line 1882 & 1845
-                    //https://github.com/dotnet/runtime/blob/release/6.0/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/Http2Connection.cs
-                    // byte 4 sets the flags
-                    // 4 means EndHeaders.
-                    settingsBuffer[4] = 4;
-                    settingsBuffer.CopyTo(buffer);
-                    return settingsReadBytes;
+                    this.prefaceServerResponse.CopyTo(buffer);
+                    isFirstRead = false;
+                    return this.prefaceServerResponse.Length;
                 }
             }
         }
