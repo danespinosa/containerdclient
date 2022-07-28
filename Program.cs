@@ -15,21 +15,10 @@ const string pipeName = @"\\.\pipe\containerd-containerd";
 bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 Console.WriteLine($"Check pipe: {File.Exists(@"\\.\pipe\containerd-containerd")}");
 IConnectionFactory connectionFactory = isWindows ? new NamedPipeConnectionFactory(pipeName) : new UnixDomainSocketConnectionFactory(sockPath);
-// IConnectionFactory connectionFactory = new UnixDomainSocketConnectionFactory(pipeName);
 var socketsHttpHandler = new SocketsHttpHandler
 {
     ConnectCallback = connectionFactory.ConnectAsync,
-    //PlaintextStreamFilter = PlainTextStreamFilter
 };
-
-async ValueTask<Stream> PlainTextStreamFilter(SocketsHttpPlaintextStreamFilterContext arg1, CancellationToken arg2)
-{
-    var http2Stream = new Http2Stream((NamedPipeClientStream)arg1.PlaintextStream);
-    var b = new byte[32000];
-    var bytes = await http2Stream.ReadAsync(b);
-
-    return http2Stream;
-}
 
 var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
 {
@@ -53,142 +42,44 @@ else
 
 public sealed class NamedPipeConnectionFactory : IConnectionFactory
 {
-    private readonly string _pipeName;
     private IntPtr handle;
     private NamedPipeClientStream _pipe;
     private IntPtr completionHandle;
 
-    public NamedPipeConnectionFactory(string pipeName) {
-        _pipeName = pipeName;
-       
-        //this._pipe = new namedpipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: this.handle);
+    public NamedPipeConnectionFactory(string pipeName)
+    {
+        uint pipeFlags = FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
+        uint fileAccess = GENERIC_READ | GENERIC_WRITE;
+        int error;
+        this.handle = CreateFileW(
+            pipeName,// the pipe name,
+            fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
+            0,                  // sharing: none
+            IntPtr.Zero,           // security attributes
+            FileMode.Open,      // open existing
+            pipeFlags,         // impersonation flags
+            IntPtr.Zero);  // template file: null
+        if (this.handle == (IntPtr)(-1))
+        {
+            error = Marshal.GetLastWin32Error();
+        }
+
+        _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
     }
-
-    //public async ValueTask<Stream> ConnectAsync2(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
-    //{
-    //    var buffer = new byte[24];
-    //    int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
-    //    var client = new namedpipeClientStream(".",
-    //        "containerd-containerd",
-    //        PipeDirection.InOut,
-    //        PipeOptions.Asynchronous,
-    //        TokenImpersonationLevel.Anonymous);
-
-    //    await client.ConnectAsync();
-    //    await client.
-    //    (buffer.AsMemory(0, numWrite));
-    //    return client;
-    //}
-
-    //public async ValueTask<Stream> ConnectAsync3(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken) 
-    //{
-    //    // Write preface
-    //    int pipeFlags = SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED;
-    //    //int fileAccess = unchecked((int)(GENERIC_READ | GENERIC_WRITE));
-    //    uint fileAccess = GENERIC_READ | GENERIC_WRITE;
-    //    //int fileAccess = FILE_READ_DATA | FILE_WRITE_ATTRIBUTES;
-    //    var secAttributes = default(SECURITY_ATTRIBUTES);
-    //    this.handle = CreateFileW(
-    //        $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
-    //        fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
-    //        0,                  // sharing: none
-    //        ref secAttributes,           // security attributes
-    //        FileMode.Open,      // open existing
-    //        SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED,         // impersonation flags
-    //        IntPtr.Zero);  // template file: null
-    //    int error = Marshal.GetLastWin32Error();
-
-        
-    //    var handle2 = CreateFileW(
-    //        $"\\\\.\\pipe\\containerd-containerd",// _pipeName,
-    //        fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
-    //        0,                  // sharing: none
-    //        ref secAttributes,           // security attributes
-    //        FileMode.Open,      // open existing
-    //        SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS | FILE_FLAG_OVERLAPPED,         // impersonation flags
-    //        IntPtr.Zero);  // template file: null
-    //    error = Marshal.GetLastWin32Error();
-    //    var buffer = new byte[24];
-    //    int numWrite = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", buffer);
-    //    NativeOverlapped nativeOverlapped = new NativeOverlapped();
-    //    ManualResetEvent eventWaitHandle = new ManualResetEvent(false);
-    //    var writtenBytes = (uint)numWrite;
-
-    //    _pipe = new namedpipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle2, ownsHandle: true));
-    //    var buffer2 = new byte[24];
-    //    //await _pipe.ConnectAsync();
-    //    await _pipe.WriteAsync(buffer.AsMemory(0, numWrite));
-    //    return _pipe;
-    //}
 
     public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
     {
-     
-        try
+        /// Unblock the pipe by reading the first messages from the pipe which tells the HTTP/2 client how to behave.
+        /// This approach is not 100% compatible with the current HTTP Client implementation so we skip the HttpClient processing this first message.
+        _ = Task.Run(async () =>
         {
-            // await _pipe.ConnectAsync(timeout: 1000, cancellationToken);
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                //_pipe.ReadMode = PipeTransmissionMode.Byte;
-            }
+            var b = new byte[32];
+            var bytes = await _pipe.ReadAsync(b);
+            Console.WriteLine($"Read {bytes} from named pipe to avoid blocking further calls.");
+        }, cancellationToken);
 
-            // Write preface
-            uint pipeFlags = FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
-            uint fileAccess = GENERIC_READ | GENERIC_WRITE;
-            int error;
-            this.handle = CreateFileW(
-                _pipeName,// _pipeName,
-                fileAccess,           // read access that allows to set ReadMode to message on lines 114 & 172
-                0,                  // sharing: none
-                IntPtr.Zero,           // security attributes
-                FileMode.Open,      // open existing
-                pipeFlags,         // impersonation flags
-                IntPtr.Zero);  // template file: null
-            if (this.handle == (IntPtr)(-1))
-            {
-                error = Marshal.GetLastWin32Error();
-            }
-
-            _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
-            //var http2Stream = new Http2Stream(_pipe);
-            //var b = new byte[32000];
-            //var bytes = await http2Stream.ReadAsync(b);
-
-            //return http2Stream;
-
-            var read = Task.Run(async () =>
-            {
-                var b = new byte[32000];
-                int i = 0;
-                var bytes = await _pipe.ReadAsync(b);
-                Console.WriteLine($"Read {bytes}");
-            });
-
-            //var buffer = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
-
-            ////await _pipe.WriteAsync(buffer);
-            //var write = WriteFile(this.handle, buffer, buffer.Length, IntPtr.Zero, IntPtr.Zero);
-            //error = Marshal.GetLastWin32Error();
-            //byte[] settings = new byte[8];
-            //write = WriteFile(this.handle, settings, settings.Length, IntPtr.Zero, IntPtr.Zero);
-            //error = Marshal.GetLastWin32Error();
-            //await Task.Delay(8000);
-            //write = WriteFile(handle, buffer, writtenBytes, out uint bytesWritten2, ref nativeOverlapped);
-            //error = Marshal.GetLastWin32Error();
-            //_pipe.Write(buffer, 0, numWrite);
-            // Write Settings
-            //numWrite = Encoding.ASCII.GetBytes(String.Empty, buffer);
-            //WriteFile(handle, buffer, (uint)numWrite, out uint bytesWritten3, ref nativeOverlapped);
-
-            Console.WriteLine("connected");
-        }
-        catch
-        {
-            //await _pipe.DisposeAsync();
-            throw;
-        }
-
-        return _pipe;
+        var http2Stream = new Http2Stream(_pipe);
+        return http2Stream;
     }
 
     private void StartCompletionRoutine()
@@ -224,7 +115,6 @@ class Http2Stream : Stream
     {
         namedpipeClientStream = namedPipeClientStream;
         this.isFirst = true;
-        this.frameReadBytes = 0;
     }
 
     public override bool CanRead => namedpipeClientStream.CanRead;
@@ -239,8 +129,6 @@ class Http2Stream : Stream
     private NamedPipeClientStream namedpipeClientStream { get; }
 
     private bool isFirst;
-    private int frameReadBytes;
-    private byte[]? settingsBuffer;
 
     public override void Flush()
     {
@@ -249,41 +137,7 @@ class Http2Stream : Stream
 
     public override int Read(byte[] buffer, int offset, int count)
     {
-
-        if (isFirst)
-        {
-            lock (settingsFrameReadLock)
-            {
-                if (isFirst)
-                {
-                    // The first read unblocks the blocked call, but when reading then we get the first Frames that are the FrameSettings returned from the Server.
-                    // We store those settings back so the HTTP/2.0 client receives the right settings the first time the http2/client tries to read those settings.
-                    this.frameReadBytes = this.namedpipeClientStream.Read(buffer, offset, count);
-                    this.settingsBuffer = new byte[buffer.Length];
-                    CopyBytesFromBufferToBuffer(buffer, settingsBuffer, this.frameReadBytes);
-                    isFirst = false;
-
-                    return 0;
-                }
-            }
-        }
-
-        //if (this.settingsBuffer != null)
-        //{
-        //    lock (settingsFrameReadLock)
-        //    {
-        //        if (this.settingsBuffer != null)
-        //        {
-        //            CopyBytesFromBufferToBuffer(settingsBuffer, buffer, this.frameReadBytes);
-                    
-        //            this.settingsBuffer = null;
-        //            return frameReadBytes;
-        //        }
-        //    }
-        //}
-
-        var readBytes = this.namedpipeClientStream.Read(buffer, offset, count);
-        return readBytes;
+        return this.namedpipeClientStream.Read(buffer, offset, count);
     }
 
     public override long Seek(long offset, SeekOrigin origin)
@@ -301,15 +155,47 @@ class Http2Stream : Stream
         this.namedpipeClientStream.Write(buffer, offset, count);
     }
 
-    private void CopyBytesFromBufferToBuffer(byte[] bufferA, byte[] bufferB, int count) 
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
-        if (bufferB.Length < count)
+        return this.namedpipeClientStream.ReadAsync(buffer, offset, count, cancellationToken);
+    }
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        /// We do the first read synchronously, this gets the settings headers.
+        /// Modifying the byte 4 is necessary to tell the HTTP Client 2 that we did all the necessary preface/header communication beforehand.
+        if (isFirst)
         {
-            throw new InvalidOperationException($"The buffer b size has to be at least of size {count}");
+            lock (settingsFrameReadLock)
+            {
+                if (isFirst)
+                {
+                    isFirst = false;
+                    byte[] settingsBuffer = new byte[9];
+                    var settingsReadBytes = this.namedpipeClientStream.Read(settingsBuffer, 0, settingsBuffer.Length);
+
+                    //See Line 1882 & 1845
+                    //https://github.com/dotnet/runtime/blob/release/6.0/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/Http2Connection.cs
+                    // byte 4 sets the flags
+                    // 4 means EndHeaders.
+                    settingsBuffer[4] = 4;
+                    settingsBuffer.CopyTo(buffer);
+                    return settingsReadBytes;
+                }
+            }
         }
-        for (int i = 0; i < count; i++)
-        {
-            bufferB[i] = bufferA[i];
-        }
+
+        var readBytes = await this.namedpipeClientStream.ReadAsync(buffer, cancellationToken);
+        return readBytes;
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        return this.namedpipeClientStream.WriteAsync(buffer, offset, count, cancellationToken);
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        return this.namedpipeClientStream.WriteAsync(buffer, cancellationToken);
     }
 }
