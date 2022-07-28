@@ -1,4 +1,5 @@
 ﻿using Containerd.Services.Containers.V1;
+using Containerd.Services.Namespaces.V1;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
@@ -30,15 +31,28 @@ var headers = new Metadata
 {
     { "containerd-namespace", "default" }
 };
-var response = await client.ListAsync(new ListContainersRequest(), headers);
-if (response == null)
+
+
+var listNamespaceRequest = new ListNamespacesRequest();
+var namespaceClient = new Namespaces.NamespacesClient(channel);
+var namespaces = await namespaceClient.ListAsync(listNamespaceRequest, headers);
+foreach (var @namespace in namespaces.Namespaces)
 {
-    Console.WriteLine("No response");
+    headers = new Metadata
+    {
+        { "containerd-namespace", @namespace.Name }
+    };
+    var response = await client.ListAsync(new ListContainersRequest(), headers);
+    if (response == null)
+    {
+        Console.WriteLine("No response");
+    }
+    else
+    {
+        Console.WriteLine(response);
+    }
 }
-else
-{
-    Console.WriteLine(response);
-}
+
 
 public sealed class NamedPipeConnectionFactory : IConnectionFactory
 {
@@ -57,7 +71,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             FileMode.Open,      // open existing
             pipeFlags,         // impersonation flags
             IntPtr.Zero);  // template file: null
-        if (this.handle == null)
+        if (this.handle.IsInvalid)
         {
             error = Marshal.GetLastWin32Error();
             throw new InvalidOperationException($"Failed to create file for pipe. Win error: {error}");
