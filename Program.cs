@@ -42,10 +42,8 @@ else
 
 public sealed class NamedPipeConnectionFactory : IConnectionFactory
 {
-    private IntPtr handle;
+    private SafePipeHandle handle;
     private NamedPipeClientStream _pipe;
-    private IntPtr completionHandle;
-
     public NamedPipeConnectionFactory(string pipeName)
     {
         uint pipeFlags = FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS;
@@ -59,12 +57,13 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory
             FileMode.Open,      // open existing
             pipeFlags,         // impersonation flags
             IntPtr.Zero);  // template file: null
-        if (this.handle == (IntPtr)(-1))
+        if (this.handle == null)
         {
             error = Marshal.GetLastWin32Error();
+            throw new InvalidOperationException($"Failed to create file for pipe. Win error: {error}");
         }
 
-        _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
+        _pipe = new NamedPipeClientStream(PipeDirection.InOut, isAsync: true, isConnected: true, safePipeHandle: handle);
     }
 
     public ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
