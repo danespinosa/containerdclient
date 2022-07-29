@@ -1,15 +1,12 @@
 ﻿using Containerd.Services.Containers.V1;
 using Containerd.Services.Namespaces.V1;
-using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using static Pipes;
 
 const string sockPath = "/run/containerd/containerd.sock";
@@ -47,27 +44,32 @@ foreach (var @namespace in namespaces.Namespaces)
     byte[] buffer = new byte[8192];
     var jsonOptions = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true };
     {
-        foreach (var container in response.Containers)
+        using(MemoryStream memoryStream = new MemoryStream(buffer))
         {
-            using (MemoryStream memoryStream = new MemoryStream())
+            foreach (var container in response.Containers)
             {
                 Console.WriteLine(container.Id);
-                var spec = container.Spec.Value.ToStringUtf8();
-                container.Spec.Value.WriteTo(memoryStream);
-                //JsonFormatter.Default.Format(container, streamWriter);
-                var currentWrittenBytes = (int)memoryStream.Position;
+                var spec = GetSpec(container, buffer, memoryStream, jsonOptions);
                 memoryStream.Position = 0;
-                string value = Encoding.UTF8.GetString(memoryStream.GetBuffer(), 0, currentWrittenBytes);
-                memoryStream.Position = 0;
-                var specObject = await JsonSerializer.DeserializeAsync<SpecV1>(memoryStream, jsonOptions);
-                memoryStream.Position = 0;
-
+                Console.WriteLine(spec);
             }
-            //Console.WriteLine(.Unpack<SpecV1>());
+
         }
     }
     
 }
+
+SpecV1? GetSpec(Container container, byte[] buffer, MemoryStream memoryStream, JsonSerializerOptions jsonOptions)
+{
+    var spec = container.Spec.Value.ToStringUtf8();
+    container.Spec.Value.WriteTo(memoryStream);
+    var currentWrittenBytes = (int)memoryStream.Position;
+    var memorySpan = buffer.AsSpan<byte>(0, currentWrittenBytes);
+    var specObject = JsonSerializer.Deserialize<SpecV1>(memorySpan, jsonOptions);
+    return specObject;
+}
+
+
 
 class SpecV1 
 {
@@ -94,7 +96,6 @@ class CpuResource
 {
     public int Count { get; set; }
 }
-
 
 public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
 {
