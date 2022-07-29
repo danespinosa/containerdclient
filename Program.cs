@@ -171,7 +171,11 @@ class Http2Stream : Stream
         if (isFirstRead)
         {
             var initialRead = await initialReadTask;
+
+            // TODO: What happens if buffer passed to ReadAsync isn't big enough for initial read data.
+            // Could save the initial read data and keep replaying in ReadAsync calls until empty.
             initialRead.CopyTo(buffer);
+
             isFirstRead = false;
             return initialRead.Length;
         }
