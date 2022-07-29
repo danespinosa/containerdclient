@@ -1,5 +1,7 @@
 ﻿using Containerd.Services.Containers.V1;
 using Containerd.Services.Namespaces.V1;
+using Containerd.Services.Tasks.V1;
+using Containerd.V1.Types;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
@@ -33,6 +35,7 @@ var headers = new Metadata
 
 var listNamespaceRequest = new ListNamespacesRequest();
 var namespaceClient = new Namespaces.NamespacesClient(channel);
+var taskClient = new Tasks.TasksClient(channel);
 var namespaces = await namespaceClient.ListAsync(listNamespaceRequest, headers);
 foreach (var @namespace in namespaces.Namespaces)
 {
@@ -43,18 +46,23 @@ foreach (var @namespace in namespaces.Namespaces)
     var response = await client.ListAsync(new ListContainersRequest(), headers);
     byte[] buffer = new byte[8192];
     var jsonOptions = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true };
+    using(MemoryStream memoryStream = new MemoryStream(buffer))
     {
-        using(MemoryStream memoryStream = new MemoryStream(buffer))
+        var taskRequest = new ListTasksRequest();
+        var tasks = taskClient.List(taskRequest, headers);
+        var taskDictionary = tasks.Tasks.ToDictionary(t => t.Id);
+        foreach (var container in response.Containers)
         {
-            foreach (var container in response.Containers)
+            Console.WriteLine(container.Id);
+            var spec = GetSpec(container, buffer, memoryStream, jsonOptions);
+            memoryStream.Position = 0;
+            Console.WriteLine(spec);
+            if (taskDictionary.TryGetValue(container.Id, out Process? process))
             {
-                Console.WriteLine(container.Id);
-                var spec = GetSpec(container, buffer, memoryStream, jsonOptions);
-                memoryStream.Position = 0;
-                Console.WriteLine(spec);
+                Console.WriteLine($"{container.Id} - {process.Id} - {process.Pid}");
             }
-
         }
+
     }
     
 }
