@@ -1,11 +1,15 @@
 ﻿using Containerd.Services.Containers.V1;
 using Containerd.Services.Namespaces.V1;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using static Pipes;
 
 const string sockPath = "/run/containerd/containerd.sock";
@@ -40,14 +44,55 @@ foreach (var @namespace in namespaces.Namespaces)
         { "containerd-namespace", @namespace.Name }
     };
     var response = await client.ListAsync(new ListContainersRequest(), headers);
-    if (response == null)
+    byte[] buffer = new byte[8192];
+    var jsonOptions = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true };
     {
-        Console.WriteLine("No response");
+        foreach (var container in response.Containers)
+        {
+            using (MemoryStream memoryStream = new MemoryStream())
+            {
+                Console.WriteLine(container.Id);
+                var spec = container.Spec.Value.ToStringUtf8();
+                container.Spec.Value.WriteTo(memoryStream);
+                //JsonFormatter.Default.Format(container, streamWriter);
+                var currentWrittenBytes = (int)memoryStream.Position;
+                memoryStream.Position = 0;
+                string value = Encoding.UTF8.GetString(memoryStream.GetBuffer(), 0, currentWrittenBytes);
+                memoryStream.Position = 0;
+                var specObject = await JsonSerializer.DeserializeAsync<SpecV1>(memoryStream, jsonOptions);
+                memoryStream.Position = 0;
+
+            }
+            //Console.WriteLine(.Unpack<SpecV1>());
+        }
     }
-    else
-    {
-        Console.WriteLine(response);
-    }
+    
+}
+
+class SpecV1 
+{
+    public Os Windows { get; set; }
+}
+
+class Os
+{
+    public Resources Resources { get; set; }
+}
+
+class Resources
+{
+    public MemoryResource Memory { get; set; }
+    public CpuResource Cpu { get; set; }
+}
+
+class MemoryResource
+{
+    public long Limit { get; set; }
+}
+
+class CpuResource
+{
+    public int Count { get; set; }
 }
 
 
