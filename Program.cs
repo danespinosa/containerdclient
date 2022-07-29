@@ -131,13 +131,17 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
         // Start the reader goroutine for incoming message. Each transport has
         // a dedicated goroutine which reads HTTP2 frame from network. Then it
         // dispatches the frame to the corresponding stream entity.
-        var b = new byte[32];
-        var bytes = await _pipe.ReadAsync(b);
-        Console.WriteLine($"Read {bytes} from named pipe to avoid blocking further calls.");
-        Memory<byte> prefaceResponse = new Memory<byte>(b, 0, bytes);
-
-        var http2Stream = new Http2Stream(_pipe, prefaceResponse);
+        var http2Stream = new Http2Stream(_pipe, InitialReadAsync());
         return http2Stream;
+    }
+
+    private async Task<Memory<byte>> InitialReadAsync()
+    {
+        var buffer = new byte[32];
+        var readCount = await _pipe.ReadAsync(buffer);
+        Console.WriteLine($"Read {readCount} from named pipe to avoid blocking further calls.");
+        Memory<byte> prefaceResponse = new Memory<byte>(buffer, 0, readCount);
+        return prefaceResponse;
     }
 
     public void Dispose()
@@ -154,17 +158,12 @@ public interface IConnectionFactory: IDisposable
 
 class Http2Stream : Stream
 {
-    static object settingsFrameReadLock = new object();
-    public Http2Stream(NamedPipeClientStream namedPipeClientStream)
-    {
-        namedpipeClientStream = namedPipeClientStream;
-        this.isFirstRead = true;
-    }
+    private Task<Memory<byte>> initialReadTask;
 
-    public Http2Stream(NamedPipeClientStream namedPipeClientStream, Memory<byte> prefaceServerResponse)
+    public Http2Stream(NamedPipeClientStream namedPipeClientStream, Task<Memory<byte>> initialReadTask)
     {
         namedpipeClientStream = namedPipeClientStream;
-        this.prefaceServerResponse = prefaceServerResponse;
+        this.initialReadTask = initialReadTask;
         this.isFirstRead = true;
     }
 
@@ -178,8 +177,6 @@ class Http2Stream : Stream
 
     public override long Position { get { return this.namedpipeClientStream.Position; } set  { this.namedpipeClientStream.Position = value; } }
     private NamedPipeClientStream namedpipeClientStream { get; }
-
-    private Memory<byte> prefaceServerResponse;
 
     private bool isFirstRead;
 
@@ -218,15 +215,14 @@ class Http2Stream : Stream
         /// We do the first read at connection time and when the httpclient calls we respond with that same response.
         if (isFirstRead)
         {
-            lock (settingsFrameReadLock)
-            {
-                if (isFirstRead)
-                {
-                    this.prefaceServerResponse.CopyTo(buffer);
-                    isFirstRead = false;
-                    return this.prefaceServerResponse.Length;
-                }
-            }
+            var initialRead = await initialReadTask;
+
+            // TODO: What happens if buffer passed to ReadAsync isn't big enough for initial read data.
+            // Could save the initial read data and keep replaying in ReadAsync calls until empty.
+            initialRead.CopyTo(buffer);
+
+            isFirstRead = false;
+            return initialRead.Length;
         }
 
         var readBytes = await this.namedpipeClientStream.ReadAsync(buffer, cancellationToken);
