@@ -43,38 +43,49 @@ foreach (var @namespace in namespaces.Namespaces)
     {
         { "containerd-namespace", @namespace.Name }
     };
+    var taskRequest = new ListTasksRequest();
     var response = await client.ListAsync(new ListContainersRequest(), headers);
+    var tasks = taskClient.List(taskRequest, headers);
+    var taskDictionary = tasks.Tasks.ToDictionary(t => t.Id);
     byte[] buffer = new byte[8192];
     var jsonOptions = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true };
     using(MemoryStream memoryStream = new MemoryStream(buffer))
     {
-        var taskRequest = new ListTasksRequest();
-        var tasks = taskClient.List(taskRequest, headers);
-        var taskDictionary = tasks.Tasks.ToDictionary(t => t.Id);
         foreach (var container in response.Containers)
         {
             Console.WriteLine(container.Id);
-            var spec = GetSpec(container, buffer, memoryStream, jsonOptions);
+            var spec = GetSpec(container, jsonOptions);
             memoryStream.Position = 0;
-            Console.WriteLine(spec);
-            if (taskDictionary.TryGetValue(container.Id, out Process? process))
+            if (spec!.RootElement.TryGetProperty("resources", out JsonElement jsonElement))
             {
-                Console.WriteLine($"{container.Id} - {process.Id} - {process.Pid}");
+                Console.WriteLine($"resources for {container.Id}");
+                Console.WriteLine(jsonElement);
             }
-        }
 
+            Console.WriteLine("Processes");
+            ListPidsRequest processRequest = new() { ContainerId = container.Id };
+            ListPidsResponse pidsResponse = await taskClient.ListPidsAsync(processRequest, headers);
+            foreach (var item in pidsResponse.Processes)
+            {
+                Console.WriteLine($"{item.Pid}, {item.Info?.Value.ToStringUtf8()}");
+            }
+
+            Console.WriteLine("------------------------------");
+        }
     }
     
 }
 
-SpecV1? GetSpec(Container container, byte[] buffer, MemoryStream memoryStream, JsonSerializerOptions jsonOptions)
+JsonDocument? GetSpec(Container container, JsonSerializerOptions jsonOptions)
 {
-    var spec = container.Spec.Value.ToStringUtf8();
-    container.Spec.Value.WriteTo(memoryStream);
-    var currentWrittenBytes = (int)memoryStream.Position;
-    var memorySpan = buffer.AsSpan<byte>(0, currentWrittenBytes);
-    var specObject = JsonSerializer.Deserialize<SpecV1>(memorySpan, jsonOptions);
-    return specObject;
+    using (MemoryStream memoryStream = new MemoryStream())
+    {
+        var spec = container.Spec.Value.ToStringUtf8();
+        container.Spec.Value.WriteTo(memoryStream);
+        memoryStream.Position = 0;
+        var specObject = JsonSerializer.Deserialize<JsonDocument>(memoryStream, jsonOptions);
+        return specObject;
+    }
 }
 
 
