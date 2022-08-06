@@ -19,6 +19,7 @@ using IConnectionFactory connectionFactory = isWindows ? new NamedPipeConnection
 var socketsHttpHandler = new SocketsHttpHandler
 {
     ConnectCallback = connectionFactory.ConnectAsync,
+    UseProxy = false,
 };
 
 var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
@@ -63,11 +64,16 @@ foreach (var @namespace in namespaces.Namespaces)
             }
 
             Console.WriteLine("Processes");
-            ListPidsRequest processRequest = new() { ContainerId = container.Id };
-            ListPidsResponse pidsResponse = await taskClient.ListPidsAsync(processRequest, headers);
-            foreach (var item in pidsResponse.Processes)
+
+            // Tasks indicate that the container is running
+            if (taskDictionary.ContainsKey(container.Id))
             {
-                Console.WriteLine($"{item.Pid}, {item.Info?.Value.ToStringUtf8()}");
+                ListPidsRequest processRequest = new() { ContainerId = container.Id };
+                ListPidsResponse pidsResponse = await taskClient.ListPidsAsync(processRequest, headers);
+                foreach (var item in pidsResponse.Processes)
+                {
+                    Console.WriteLine($"{item.Pid}, {item.Info?.Value.ToStringUtf8()}");
+                }
             }
 
             Console.WriteLine("------------------------------");
@@ -86,34 +92,6 @@ JsonDocument? GetSpec(Container container, JsonSerializerOptions jsonOptions)
         var specObject = JsonSerializer.Deserialize<JsonDocument>(memoryStream, jsonOptions);
         return specObject;
     }
-}
-
-
-
-class SpecV1 
-{
-    public Os Windows { get; set; }
-}
-
-class Os
-{
-    public Resources Resources { get; set; }
-}
-
-class Resources
-{
-    public MemoryResource Memory { get; set; }
-    public CpuResource Cpu { get; set; }
-}
-
-class MemoryResource
-{
-    public long Limit { get; set; }
-}
-
-class CpuResource
-{
-    public int Count { get; set; }
 }
 
 public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
@@ -144,15 +122,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
 
     public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
     {
-        // Reading the first frame that the server sends to unblock the first write that the client will do.
-        // The Http2Stream will respond with this preface response at first read.
-        // This is the same behavior that http2_client in go. Line 367 t.reader()
-        // https://github.com/grpc/grpc-go/blob/master/internal/transport/http2_client.go
-        // Start the reader goroutine for incoming message. Each transport has
-        // a dedicated goroutine which reads HTTP2 frame from network. Then it
-        // dispatches the frame to the corresponding stream entity.
-        var http2Stream = new Http2Stream(_pipe, InitialReadAsync());
-        return http2Stream;
+        return _pipe;
     }
 
     private async Task<Memory<byte>> InitialReadAsync()
