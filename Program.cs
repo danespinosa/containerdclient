@@ -1,13 +1,16 @@
-﻿using Containerd.Services.Containers.V1;
+﻿using Containerd.Runhcs.V1;
+using Containerd.Services.Containers.V1;
 using Containerd.Services.Namespaces.V1;
 using Containerd.Services.Tasks.V1;
 using Containerd.V1.Types;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using static Pipes;
 
@@ -72,7 +75,28 @@ foreach (var @namespace in namespaces.Namespaces)
                 ListPidsResponse pidsResponse = await taskClient.ListPidsAsync(processRequest, headers);
                 foreach (var item in pidsResponse.Processes)
                 {
-                    Console.WriteLine($"{item.Pid}, {item.Info?.Value.ToStringUtf8()}");
+                    using (MemoryStream memoryStream1 = new MemoryStream())
+                    {
+                        string processInfo = string.Empty;
+                        string processInfo2 = string.Empty;
+                        if (item.Info.Value is not null)
+                        {
+                            Console.Write($"Process Url type: {item.Info.TypeUrl}");
+                            // Windows: https://github.com/microsoft/hcsshim/blob/master/cmd/containerd-shim-runhcs-v1/options/runhcs.proto
+                            // Linux: 
+                            var pd = ProcessDetails.Parser.ParseFrom(item.Info.Value);
+                            bool @is = item.Info.Is(ProcessDetails.Descriptor);
+                            //processInfo2 = JsonFormatter.Default.Format(item.Info);
+                            // Console.WriteLine($"Got info for process{item.Pid}");
+                            item.Info.Value.WriteTo(memoryStream1);
+                            var bytesTo = memoryStream1.Position;
+                            memoryStream1.Position = 0;
+                            processInfo = Encoding.UTF8.GetString(memoryStream1.ToArray(), 0, (int)bytesTo);
+                        }
+                        
+                        Console.WriteLine($"{item.Pid}, {processInfo2}");
+                    }
+                    
                 }
             }
 
@@ -86,6 +110,8 @@ JsonDocument? GetSpec(Container container, JsonSerializerOptions jsonOptions)
 {
     using (MemoryStream memoryStream = new MemoryStream())
     {
+        // https://github.com/opencontainers/runtime-spec/blob/main/schema/config-linux.json
+        // https://github.com/opencontainers/runtime-spec/blob/main/schema/config-windows.json
         var spec = container.Spec.Value.ToStringUtf8();
         container.Spec.Value.WriteTo(memoryStream);
         memoryStream.Position = 0;
@@ -121,8 +147,15 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
     }
 
     public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
-    {
-        return _pipe;
+    {   // Reading the first frame that the server sends to unblock the first write that the client will do.
+        // The Http2Stream will respond with this preface response at first read.
+        // This is the same behavior that http2_client in go. Line 367 t.reader()
+        // https://github.com/grpc/grpc-go/blob/master/internal/transport/http2_client.go
+        // Start the reader goroutine for incoming message. Each transport has
+        // a dedicated goroutine which reads HTTP2 frame from network. Then it
+        // dispatches the frame to the corresponding stream entity.
+        var http2Stream = new Http2Stream(_pipe, InitialReadAsync());
+        return http2Stream;
     }
 
     private async Task<Memory<byte>> InitialReadAsync()
