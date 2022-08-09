@@ -84,14 +84,18 @@ foreach (var @namespace in namespaces.Namespaces)
                             Console.Write($"Process Url type: {item.Info.TypeUrl}");
                             // Windows: https://github.com/microsoft/hcsshim/blob/master/cmd/containerd-shim-runhcs-v1/options/runhcs.proto
                             // Linux: 
-                            var pd = ProcessDetails.Parser.ParseFrom(item.Info.Value);
-                            bool @is = item.Info.Is(ProcessDetails.Descriptor);
-                            //processInfo2 = JsonFormatter.Default.Format(item.Info);
-                            // Console.WriteLine($"Got info for process{item.Pid}");
-                            item.Info.Value.WriteTo(memoryStream1);
-                            var bytesTo = memoryStream1.Position;
-                            memoryStream1.Position = 0;
-                            processInfo = Encoding.UTF8.GetString(memoryStream1.ToArray(), 0, (int)bytesTo);
+
+                            if (isWindows)
+                            {
+                                var pd = ProcessDetails.Parser.ParseFrom(item.Info.Value);
+
+                                // The process name.
+                                processInfo2 = pd.ImageName;
+                            }
+                            else
+                            {
+                                // Get ProcessDetails for Linux.
+                            }
                         }
                         
                         Console.WriteLine($"{item.Pid}, {processInfo2}");
