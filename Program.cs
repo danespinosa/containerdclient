@@ -1,11 +1,17 @@
-﻿using Containerd.Services.Containers.V1;
+﻿using Containerd.Runhcs.V1;
+using Containerd.Services.Containers.V1;
 using Containerd.Services.Namespaces.V1;
+using Containerd.Services.Tasks.V1;
+using Containerd.V1.Types;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Win32.SafeHandles;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
 using static Pipes;
 
 const string sockPath = "/run/containerd/containerd.sock";
@@ -16,6 +22,7 @@ using IConnectionFactory connectionFactory = isWindows ? new NamedPipeConnection
 var socketsHttpHandler = new SocketsHttpHandler
 {
     ConnectCallback = connectionFactory.ConnectAsync,
+    UseProxy = false,
 };
 
 var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
@@ -32,6 +39,7 @@ var headers = new Metadata
 
 var listNamespaceRequest = new ListNamespacesRequest();
 var namespaceClient = new Namespaces.NamespacesClient(channel);
+var taskClient = new Tasks.TasksClient(channel);
 var namespaces = await namespaceClient.ListAsync(listNamespaceRequest, headers);
 foreach (var @namespace in namespaces.Namespaces)
 {
@@ -39,17 +47,82 @@ foreach (var @namespace in namespaces.Namespaces)
     {
         { "containerd-namespace", @namespace.Name }
     };
+    var taskRequest = new ListTasksRequest();
     var response = await client.ListAsync(new ListContainersRequest(), headers);
-    if (response == null)
+    var tasks = taskClient.List(taskRequest, headers);
+    var taskDictionary = tasks.Tasks.ToDictionary(t => t.Id);
+    byte[] buffer = new byte[8192];
+    var jsonOptions = new JsonSerializerOptions() { PropertyNameCaseInsensitive = true };
+    using(MemoryStream memoryStream = new MemoryStream(buffer))
     {
-        Console.WriteLine("No response");
+        foreach (var container in response.Containers)
+        {
+            Console.WriteLine(container.Id);
+            var spec = GetSpec(container, jsonOptions);
+            memoryStream.Position = 0;
+            if (spec!.RootElement.TryGetProperty("resources", out JsonElement jsonElement))
+            {
+                Console.WriteLine($"resources for {container.Id}");
+                Console.WriteLine(jsonElement);
+            }
+
+            Console.WriteLine("Processes");
+
+            // Tasks indicate that the container is running
+            if (taskDictionary.ContainsKey(container.Id))
+            {
+                ListPidsRequest processRequest = new() { ContainerId = container.Id };
+                ListPidsResponse pidsResponse = await taskClient.ListPidsAsync(processRequest, headers);
+                foreach (var item in pidsResponse.Processes)
+                {
+                    using (MemoryStream memoryStream1 = new MemoryStream())
+                    {
+                        string processInfo = string.Empty;
+                        string processInfo2 = string.Empty;
+                        if (item.Info.Value is not null)
+                        {
+                            Console.Write($"Process Url type: {item.Info.TypeUrl}");
+                            // Windows: https://github.com/microsoft/hcsshim/blob/master/cmd/containerd-shim-runhcs-v1/options/runhcs.proto
+                            // Linux: 
+
+                            if (isWindows)
+                            {
+                                var pd = ProcessDetails.Parser.ParseFrom(item.Info.Value);
+
+                                // The process name.
+                                processInfo2 = pd.ImageName;
+                            }
+                            else
+                            {
+                                // Get ProcessDetails for Linux.
+                            }
+                        }
+                        
+                        Console.WriteLine($"{item.Pid}, {processInfo2}");
+                    }
+                    
+                }
+            }
+
+            Console.WriteLine("------------------------------");
+        }
     }
-    else
-    {
-        Console.WriteLine(response);
-    }
+    
 }
 
+JsonDocument? GetSpec(Container container, JsonSerializerOptions jsonOptions)
+{
+    using (MemoryStream memoryStream = new MemoryStream())
+    {
+        // https://github.com/opencontainers/runtime-spec/blob/main/schema/config-linux.json
+        // https://github.com/opencontainers/runtime-spec/blob/main/schema/config-windows.json
+        var spec = container.Spec.Value.ToStringUtf8();
+        container.Spec.Value.WriteTo(memoryStream);
+        memoryStream.Position = 0;
+        var specObject = JsonSerializer.Deserialize<JsonDocument>(memoryStream, jsonOptions);
+        return specObject;
+    }
+}
 
 public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
 {
@@ -78,8 +151,7 @@ public sealed class NamedPipeConnectionFactory : IConnectionFactory, IDisposable
     }
 
     public async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext socketsHttpConnectionContext, CancellationToken cancellationToken)
-    {
-        // Reading the first frame that the server sends to unblock the first write that the client will do.
+    {   // Reading the first frame that the server sends to unblock the first write that the client will do.
         // The Http2Stream will respond with this preface response at first read.
         // This is the same behavior that http2_client in go. Line 367 t.reader()
         // https://github.com/grpc/grpc-go/blob/master/internal/transport/http2_client.go
